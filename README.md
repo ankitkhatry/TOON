@@ -1,7 +1,6 @@
-# LoveStream 🎬
+# ToonRoom 🌈
 
-A real-time YouTube watch party app for two people.
-Create a room, share the link, watch together in sync, and chat live.
+A real-time cartoon watch party app for watching together in sync while chatting live.
 
 ![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--time-010101?style=for-the-badge&logo=socket.io)
@@ -9,17 +8,18 @@ Create a room, share the link, watch together in sync, and chat live.
 
 ## ✨ Features
 
-- Real-time video synchronization (play/pause/seek/video change)
+- Real-time playback synchronization (play/pause/seek/media change)
 - Live in-room chat
 - 4-character room code + shareable room link
-- Designed for private 2-user watch sessions
+- Cartoon/anime/kids themed UI
+- Shared server library plus imported local folders
 - Responsive UI for mobile and desktop
 
 ## 🛠️ Tech Stack
 
 - **Backend:** Node.js, Express, Socket.IO
 - **Frontend:** HTML, CSS, Vanilla JavaScript
-- **Video:** YouTube IFrame API
+- **Video:** HTML5 video player
 
 ## 🚀 Run Locally
 
@@ -40,6 +40,12 @@ npm start
 Open:
 
 - http://localhost:3000
+
+## 📁 Adding Cartoons
+
+- Put shared cartoon videos in `public/media/`
+- Supported formats: `mp4`, `webm`, `ogg`, `mov`, `m4v`
+- You can also import a local folder in the room UI; room sync uses the file path so everyone should import the same folder for full sync
 
 ## ⚙️ Environment Variables
 
@@ -69,7 +75,7 @@ After frontend is live, make sure Render `CLIENT_URL` matches the Vercel URL.
 ## 📁 Project Structure
 
 ```text
-LoveStream/
+ToonRoom/
 ├── server.js
 ├── build.js
 ├── package.json

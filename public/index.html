@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LoveStream - Watch Together 💕</title>
+  <title>ToonRoom - Watch Cartoons Together 💕</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
@@ -24,8 +24,8 @@
     <div class="container">
       <div class="welcome-card">
         <div class="welcome-icon">🎬</div>
-        <h1>LoveStream</h1>
-        <p class="subtitle">A premium couple movie night — watch, chat, and stay perfectly in sync</p>
+        <h1>ToonRoom</h1>
+        <p class="subtitle">Cartoons, anime, and kid favorites — watch together, chat live, and stay perfectly in sync</p>
 
         <!-- Form Container -->
         <div class="form-container">
@@ -41,7 +41,7 @@
               <label for="createUsername">Your Name</label>
               <input type="text" id="createUsername" placeholder="Enter your name" class="input-field" maxlength="20">
             </div>
-            <button id="createRoomBtn" class="btn btn-primary">Create Room</button>
+            <button id="createRoomBtn" class="btn btn-primary">Create Toon Room</button>
           </div>
 
           <!-- Join Room Form -->
@@ -54,7 +54,7 @@
               <label for="roomCode">Room Code</label>
               <input type="text" id="roomCode" placeholder="e.g. ABCD" class="input-field" maxlength="4" style="text-transform: uppercase;">
             </div>
-            <button id="joinRoomBtn" class="btn btn-primary">Join Room</button>
+            <button id="joinRoomBtn" class="btn btn-primary">Join Toon Room</button>
           </div>
         </div>
 
@@ -74,9 +74,10 @@
       <header class="header">
         <div class="header-left">
           <div class="header-brand">
-            <h2>💖 LoveStream</h2>
-            <span class="header-tagline">Premium couple movie night</span>
+            <h2>🌈 ToonRoom</h2>
+            <span class="header-tagline">Cute cartoons, anime nights, and live chat</span>
           </div>
+          <button id="libraryToggleBtn" class="btn btn-small btn-secondary library-toggle-btn" title="Open cartoon library">📚 Library</button>
           <span id="roomCodeDisplay" class="room-code">Room: XXXX</span>
           <span id="hostBadge" class="host-badge hidden">Host</span>
         </div>
@@ -94,24 +95,19 @@
       <div class="content-wrapper">
         <!-- Video Section (Left/Top) -->
         <div class="video-section">
-          <!-- Video Input -->
-          <div class="video-input-area">
-            <input type="text" id="youtubeUrl" placeholder="Paste YouTube link to watch together..." class="input-field">
-            <button id="loadVideoBtn" class="btn btn-primary">Load Video</button>
-          </div>
-
-          <!-- YouTube Player -->
-          <div class="video-container">
-            <div id="youtubePlayer" class="youtube-player"></div>
-            <div class="loading-spinner" id="loadingSpinner">
-              <div class="spinner"></div>
-              <p>Loading video...</p>
+          <div class="player-panel">
+            <div class="video-container">
+              <video id="mediaPlayer" class="media-player" controls playsinline></video>
+              <div class="loading-spinner" id="loadingSpinner">
+                <div class="spinner"></div>
+                <p>Loading cartoon...</p>
+              </div>
             </div>
-          </div>
 
-          <!-- Video Info -->
-          <div class="video-info">
-            <span id="videoStatus">No video loaded</span>
+            <!-- Video Info -->
+            <div class="video-info">
+              <span id="videoStatus">No cartoon loaded</span>
+            </div>
           </div>
         </div>
 
@@ -123,7 +119,7 @@
 
           <!-- Chat Messages -->
           <div id="chatMessages" class="chat-messages">
-            <div class="system-message">Connected! Say hi to your movie partner 💕</div>
+            <div class="system-message">Connected! Say hi to your cartoon buddy 💕</div>
           </div>
 
           <!-- Chat Input -->
@@ -136,6 +132,33 @@
 
       <!-- Notifications Area -->
       <div id="notificationsArea" class="notifications-area"></div>
+
+      <!-- Library Drawer -->
+      <aside id="libraryDrawer" class="library-drawer hidden" aria-label="Cartoon library">
+        <div class="library-drawer-header">
+          <div>
+            <h3>📚 Cartoon Library</h3>
+            <p>Pick a toon or import a folder</p>
+          </div>
+          <button id="closeLibraryBtn" class="btn btn-small btn-secondary" type="button">✕</button>
+        </div>
+
+        <div class="library-drawer-tools">
+          <div id="hostUploadSection" class="host-upload-section hidden">
+            <label for="folderInput" class="btn btn-secondary folder-btn drawer-action">📁 Import Folder</label>
+            <input type="file" id="folderInput" accept="video/*,.mp4,.webm,.ogg,.ogv,.mov,.m4v,.mkv,.avi,.wmv,.flv,.3gp,.ts,.m2ts,.mxf,.mpg,.mpeg,.mpe,.asf,.f4v,.m4a,.m4b,.mka,.mts,.vob,.divx,.xvid" webkitdirectory multiple hidden>
+            <p class="drawer-note upload-note">Only the host can upload cartoons for the room.</p>
+          </div>
+          <button id="refreshLibraryBtn" class="btn btn-secondary drawer-action" type="button">🔄 Refresh</button>
+          <input type="text" id="mediaSearch" placeholder="Search cartoons, anime, kids shows..." class="input-field drawer-search">
+          <div class="library-drawer-meta">
+            <span id="libraryCount" class="library-count">0</span>
+            <span class="drawer-note">Shared files from <span class="drawer-inline-path">public/media</span></span>
+          </div>
+        </div>
+
+        <div id="mediaLibrary" class="media-library drawer-library"></div>
+      </aside>
     </div>
   </div>
 
@@ -151,7 +174,7 @@
   <!-- Success Modal for Room Creation -->
   <div id="roomCreatedModal" class="modal">
     <div class="modal-content">
-      <h3>🎉 Room Created!</h3>
+      <h3>🎉 Toon Room Created!</h3>
       <p>Share this link with your friend:</p>
       <div class="room-link-display">
         <input type="text" id="roomLinkInput" readonly class="input-field">
@@ -169,9 +192,6 @@
 
   <!-- Runtime deployment config -->
   <script src="config.js"></script>
-
-  <!-- YouTube IFrame API with async loading -->
-  <script async src="https://www.youtube.com/iframe_api"></script>
 
   <!-- Main Application Script -->
   <script src="js/script.js"></script>

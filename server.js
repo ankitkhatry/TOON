@@ -2,6 +2,9 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
 
 // Initialize Express app and HTTP server
 const app = express();
@@ -16,6 +19,166 @@ const io = socketIo(server, {
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+const MEDIA_DIR = path.join(__dirname, 'public', 'media');
+const MEDIA_EXTENSIONS = new Set(['.mp4', '.webm', '.ogg', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.3gp', '.ts', '.m2ts', '.mxf', '.mpg', '.mpeg', '.mpe', '.asf', '.f4v', '.m4a', '.m4b', '.mka', '.mts', '.vob', '.divx', '.xvid']);
+const INCOMING_UPLOAD_DIR = path.join(__dirname, 'uploads', 'incoming');
+
+fs.mkdirSync(MEDIA_DIR, { recursive: true });
+fs.mkdirSync(INCOMING_UPLOAD_DIR, { recursive: true });
+
+const upload = multer({
+  dest: INCOMING_UPLOAD_DIR,
+  limits: {
+    fileSize: 4 * 1024 * 1024 * 1024
+  }
+});
+
+function encodeMediaPath(relativePath) {
+  return relativePath.split(path.sep).map(encodeURIComponent).join('/');
+}
+
+function generateHostToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function isSupportedMediaFile(fileName) {
+  return MEDIA_EXTENSIONS.has(path.extname(fileName || '').toLowerCase());
+}
+
+function sanitizeFileName(fileName) {
+  return String(fileName || 'video')
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function saveUploadedFiles(roomCode, files) {
+  const roomMediaDir = path.join(MEDIA_DIR, roomCode);
+  fs.mkdirSync(roomMediaDir, { recursive: true });
+
+  const savedItems = [];
+  const timestamp = Date.now();
+
+  files.forEach((file, index) => {
+    const originalName = file.originalname || file.filename || `video-${index + 1}`;
+    const safeOriginalName = sanitizeFileName(path.basename(originalName));
+    if (!isSupportedMediaFile(safeOriginalName)) {
+      try { fs.unlinkSync(file.path); } catch (e) {}
+      return;
+    }
+
+    const finalName = `${timestamp}-${index + 1}-${safeOriginalName}`;
+    const finalPath = path.join(roomMediaDir, finalName);
+    fs.renameSync(file.path, finalPath);
+
+    savedItems.push({
+      id: `${roomCode}/${finalName}`,
+      title: formatMediaTitle(safeOriginalName),
+      filename: safeOriginalName,
+      relativePath: `${roomCode}/${finalName}`,
+      mediaUrl: `/media/${encodeMediaPath(`${roomCode}/${finalName}`)}`,
+      sourceType: 'server'
+    });
+  });
+
+  return savedItems;
+}
+
+function emitRoomHostState(room) {
+  io.to(room.code).emit('host-changed', {
+    hostId: room.host || null,
+    hostUsername: room.hostUsername || null,
+    hostToken: room.hostToken || null
+  });
+}
+
+function formatMediaTitle(fileName) {
+  return fileName
+    .replace(/\.[^.]+$/, '')
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function scanMediaLibrary() {
+  const mediaItems = [];
+
+  function walk(currentDir, relativeDir = '') {
+    if (!fs.existsSync(currentDir)) return;
+
+    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+      const absolutePath = path.join(currentDir, entry.name);
+      const relativePath = path.join(relativeDir, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(absolutePath, relativePath);
+        continue;
+      }
+
+      const extension = path.extname(entry.name).toLowerCase();
+      if (!MEDIA_EXTENSIONS.has(extension)) continue;
+
+      mediaItems.push({
+        id: relativePath,
+        title: formatMediaTitle(entry.name),
+        filename: entry.name,
+        relativePath,
+        mediaUrl: `/media/${encodeMediaPath(relativePath)}`,
+        sourceType: 'server'
+      });
+    }
+  }
+
+  walk(MEDIA_DIR);
+  return mediaItems.sort((first, second) => first.title.localeCompare(second.title));
+}
+
+app.get('/api/media-library', (req, res) => {
+  const items = scanMediaLibrary();
+  res.json({
+    items,
+    total: items.length
+  });
+});
+
+app.post('/api/rooms/:roomCode/upload-media', upload.array('mediaFiles'), (req, res) => {
+  const roomCode = String(req.params.roomCode || '').toUpperCase();
+  const room = rooms.get(roomCode);
+
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+
+  const hostToken = String(req.headers['x-host-token'] || req.body.hostToken || '').trim();
+  if (!hostToken || hostToken !== room.hostToken) {
+    return res.status(403).json({ error: 'Host authentication failed' });
+  }
+
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (files.length === 0) {
+    return res.status(400).json({ error: 'No media files received' });
+  }
+
+  const savedItems = saveUploadedFiles(roomCode, files);
+  return res.json({
+    message: 'Upload complete',
+    uploaded: savedItems.length,
+    items: savedItems,
+    total: scanMediaLibrary().length
+  });
+});
+
 // Serve index.html on root route
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -28,8 +191,19 @@ const pendingRemovalTimers = new Map();
 
 // Helper: construct a sync state for a room, adjusting currentTime if playing
 function getSyncState(room) {
-  if (!room || !room.videoState) return { videoId: null, isPlaying: false, currentTime: 0 };
-  const vs = room.videoState;
+  if (!room || !room.mediaState) {
+    return {
+      videoId: null,
+      mediaTitle: null,
+      mediaUrl: null,
+      mediaPath: null,
+      sourceType: null,
+      isPlaying: false,
+      currentTime: 0
+    };
+  }
+
+  const vs = room.mediaState;
   let adjustedTime = vs.currentTime || 0;
   if (vs.isPlaying && vs.lastUpdated) {
     const elapsed = (Date.now() - vs.lastUpdated) / 1000.0;
@@ -37,6 +211,10 @@ function getSyncState(room) {
   }
   return {
     videoId: vs.videoId || null,
+    mediaTitle: vs.mediaTitle || null,
+    mediaUrl: vs.mediaUrl || null,
+    mediaPath: vs.mediaPath || null,
+    sourceType: vs.sourceType || null,
     isPlaying: !!vs.isPlaying,
     currentTime: adjustedTime
   };
@@ -82,8 +260,13 @@ io.on('connection', (socket) => {
           users: [],
           host: socket.id,
           hostUsername: username,
-          videoState: {
+          hostToken: generateHostToken(),
+          mediaState: {
             videoId: null,
+            mediaTitle: null,
+            mediaUrl: null,
+            mediaPath: null,
+            sourceType: null,
             isPlaying: false,
             currentTime: 0,
             lastUpdated: Date.now()
@@ -107,7 +290,8 @@ io.on('connection', (socket) => {
         roomCode: newRoomCode,
         roomLink: `${getBaseUrl(socket)}?room=${newRoomCode}`,
         hostId: socket.id,
-        hostUsername: username
+        hostUsername: username,
+        hostToken: rooms.get(newRoomCode).hostToken
       });
 
       // Notify about user count
@@ -149,7 +333,8 @@ io.on('connection', (socket) => {
           roomLink: `${getBaseUrl(socket)}?room=${roomCode}`,
           users: room.users.map(u => ({ id: u.id, username: u.username })),
           hostId: room.host || null,
-          hostUsername: room.hostUsername || null
+          hostUsername: room.hostUsername || null,
+          hostToken: room.hostToken || null
         });
 
         socket.emit('sync-video-state', getSyncState(room));
@@ -163,7 +348,7 @@ io.on('connection', (socket) => {
       // If socket already recorded in room, just sync state back
       if (room.users.find(u => u.id === socket.id)) {
         socket.emit('sync-video-state', getSyncState(room));
-        socket.emit('room-created', { roomCode: roomCode, roomLink: `${getBaseUrl(socket)}?room=${roomCode}` });
+        socket.emit('room-created', { roomCode: roomCode, roomLink: `${getBaseUrl(socket)}?room=${roomCode}`, hostId: room.host || null, hostUsername: room.hostUsername || null, hostToken: room.hostToken || null });
         socket.emit('chat-history', room.messages || []);
         return;
       }
@@ -190,7 +375,8 @@ io.on('connection', (socket) => {
         users: room.users.map(u => ({ id: u.id, username: u.username })),
         messages: room.messages || [],
         hostId: room.host || null,
-        hostUsername: room.hostUsername || null
+        hostUsername: room.hostUsername || null,
+        hostToken: room.hostToken || null
       });
 
       // Notify all users in room that someone joined
@@ -294,7 +480,8 @@ io.on('connection', (socket) => {
         const newHost = room.users[0];
         room.host = newHost.id;
         room.hostUsername = newHost.username;
-        io.to(roomCode).emit('host-changed', { hostId: room.host, hostUsername: room.hostUsername });
+        room.hostToken = generateHostToken();
+        emitRoomHostState(room);
       }
 
       // Notify remaining users
@@ -326,9 +513,9 @@ io.on('connection', (socket) => {
 
     const room = rooms.get(roomCode);
     if (room) {
-      room.videoState.isPlaying = true;
-      room.videoState.currentTime = data.currentTime;
-      room.videoState.lastUpdated = Date.now();
+      room.mediaState.isPlaying = true;
+      room.mediaState.currentTime = data.currentTime;
+      room.mediaState.lastUpdated = Date.now();
     }
 
     // Broadcast to all others (NOT sender to avoid double-play)
@@ -347,9 +534,9 @@ io.on('connection', (socket) => {
 
     const room = rooms.get(roomCode);
     if (room) {
-      room.videoState.isPlaying = false;
-      room.videoState.currentTime = data.currentTime;
-      room.videoState.lastUpdated = Date.now();
+      room.mediaState.isPlaying = false;
+      room.mediaState.currentTime = data.currentTime;
+      room.mediaState.lastUpdated = Date.now();
     }
 
     // Broadcast to all others (NOT sender to avoid double-pause)
@@ -368,13 +555,13 @@ io.on('connection', (socket) => {
 
     const room = rooms.get(roomCode);
     if (room) {
-      room.videoState.currentTime = data.currentTime;
+      room.mediaState.currentTime = data.currentTime;
     }
 
     io.to(roomCode).emit('video-seek', {
       currentTime: data.currentTime
     });
-    if (room) room.videoState.lastUpdated = Date.now();
+    if (room) room.mediaState.lastUpdated = Date.now();
   });
 
   /**
@@ -388,14 +575,22 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
 
-    room.videoState.videoId = data.videoId;
-    room.videoState.isPlaying = false;
-    room.videoState.currentTime = 0;
-    room.videoState.lastUpdated = Date.now();
+    room.mediaState.videoId = data.videoId || null;
+    room.mediaState.mediaTitle = data.mediaTitle || null;
+    room.mediaState.mediaUrl = data.mediaUrl || null;
+    room.mediaState.mediaPath = data.mediaPath || null;
+    room.mediaState.sourceType = data.sourceType || null;
+    room.mediaState.isPlaying = false;
+    room.mediaState.currentTime = 0;
+    room.mediaState.lastUpdated = Date.now();
 
     // broadcast new video to all users in the room (including sender) with full state
     io.to(roomCode).emit('video-changed', {
       videoId: data.videoId,
+      mediaTitle: data.mediaTitle || null,
+      mediaUrl: data.mediaUrl || null,
+      mediaPath: data.mediaPath || null,
+      sourceType: data.sourceType || null,
       currentTime: 0,
       isPlaying: false
     });
@@ -436,7 +631,8 @@ io.on('connection', (socket) => {
               if (newHost) {
                 room.host = newHost.id;
                 room.hostUsername = newHost.username;
-                io.to(roomCode).emit('host-changed', { hostId: room.host, hostUsername: room.hostUsername });
+                room.hostToken = generateHostToken();
+                emitRoomHostState(room);
               }
             }
 
